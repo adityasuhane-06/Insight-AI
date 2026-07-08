@@ -21,4 +21,4 @@ pymysql>=1.1.0
 cryptography>=42.0.0
 chromadb>=0.4.24
 spaces
-zhipuai
+zai-sdk
