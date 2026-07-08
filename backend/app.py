@@ -1,9 +1,11 @@
-import uvicorn
-from main import app
+import gradio as gr
+from main import app as fastapi_app
 
-# Hugging Face Spaces with Gradio SDK will execute this app.py file.
-# By explicitly binding our FastAPI app to 0.0.0.0:7860, we can trick
-# the Gradio SDK into hosting our pure FastAPI backend for free!
+def health():
+    return "Insight AI API is running!"
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+demo = gr.Interface(fn=health, inputs=[], outputs="text")
+
+# Mount the Gradio app to the FastAPI app at /gradio
+# Hugging Face Spaces Gradio SDK expects 'app' to be an ASGI app or Gradio block
+app = gr.mount_gradio_app(fastapi_app, demo, path="/gradio")
