@@ -1,8 +1,10 @@
 import gradio as gr
+import spaces
 from main import app as fastapi_app
 
+@spaces.GPU
 def health():
-    return "Insight AI API is running!"
+    return "Insight AI API is running on ZeroGPU!"
 
 demo = gr.Interface(fn=health, inputs=[], outputs="text")
 
