@@ -14,5 +14,5 @@ import uvicorn
 # Hugging Face Spaces Gradio SDK expects 'app' to be an ASGI app or Gradio block
 app = gr.mount_gradio_app(fastapi_app, demo, path="/gradio")
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+# Hugging Face ZeroGPU wrapper will automatically serve the 'app' ASGI object on port 7860.
+# Do NOT call uvicorn.run() here, otherwise it will cause an [Errno 98] address already in use error!
