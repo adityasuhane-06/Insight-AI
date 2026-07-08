@@ -2,6 +2,9 @@ import asyncio
 import logging
 import uuid
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # CRITICAL: Disable TensorFlow warnings since we are using Torch
 # This must happen before ANY other imports (especially routers/database)
@@ -33,9 +36,9 @@ async def run_e2e_test():
     async with AsyncSessionLocal() as db:
         new_session = ResearchSession(
             id=session_id,
-            company_name="Anthropic",
-            website="https://www.anthropic.com",
-            objective="Find out their latest funding rounds, model capabilities, and major competitors.",
+            company_name="Snowflake",
+            website="https://www.snowflake.com",
+            objective="Find out their latest enterprise AI products, recent financial performance, and key pain points that a cloud security vendor could pitch to their IT executives during a sales meeting.",
             status="pending"
         )
         db.add(new_session)

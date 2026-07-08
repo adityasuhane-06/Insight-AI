@@ -22,7 +22,7 @@ os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
 
 # Switch to Google Gemini embeddings to save RAM on Render!
 try:
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 except Exception as e:
     logger.error(f"[rag] Failed to initialize embeddings: {e}")
     embeddings = None
