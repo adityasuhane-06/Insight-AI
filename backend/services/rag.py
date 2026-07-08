@@ -8,7 +8,7 @@ import logging
 from typing import List
 
 # Langchain
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(__file__), "..", "chroma_data")
 os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
 
-# Using a lightweight, fast, local embedding model
+# Switch to Google Gemini embeddings to save RAM on Render!
 try:
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 except Exception as e:
     logger.error(f"[rag] Failed to initialize embeddings: {e}")
     embeddings = None
@@ -41,13 +41,13 @@ if embeddings:
         )
         vector_store = Chroma(
             client=chroma_client,
-            collection_name="research_data",
+            collection_name="research_data_v2",
             embedding_function=embeddings,
         )
     else:
         logger.info("[rag] Initializing Local Persistent ChromaDB")
         vector_store = Chroma(
-            collection_name="research_data",
+            collection_name="research_data_v2",
             embedding_function=embeddings,
             persist_directory=CHROMA_PERSIST_DIR,
         )
