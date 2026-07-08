@@ -14,7 +14,7 @@ export default function Layout() {
             <div className={styles.logoIcon}>
               <Zap size={18} />
             </div>
-            <span>ZyLabs</span>
+            <span>Insight AI</span>
             <span className={styles.logoBadge}>Copilot</span>
           </Link>
 
@@ -46,7 +46,7 @@ export default function Layout() {
       {/* ── Footer ─────────────────────────────────────────────── */}
       <footer className={styles.footer}>
         <div className="container">
-          <p>ZyLabs AI Research Copilot · Built with LangGraph + FastAPI + React</p>
+          <p>Insight AI · Built with LangGraph + FastAPI + React</p>
         </div>
       </footer>
     </div>

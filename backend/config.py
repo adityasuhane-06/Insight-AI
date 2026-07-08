@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     max_search_results: int = 5
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./zylabs.db"
+    database_url: str = "sqlite+aiosqlite:///./insight_ai.db"
 
     # App
-    app_name: str = "ZyLabs AI Research Copilot"
+    app_name: str = "Insight AI"
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 

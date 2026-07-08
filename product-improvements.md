@@ -1,4 +1,4 @@
-# Product Improvements — ZyLabs AI Research Copilot
+# Product Improvements — Insight AI
 
 ## Current Product Weaknesses
 

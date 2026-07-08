@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Synchronous engines for easy scripting
-SQLITE_URL = "sqlite:///./zylabs.db"
+SQLITE_URL = "sqlite:///./insight_ai.db"
 
 # The user has mysql+aiomysql in .env, so we strip out aiomysql and use pymysql for sync migration
 raw_mysql_url = os.getenv("DATABASE_URL")

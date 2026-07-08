@@ -1,4 +1,4 @@
-# Engineering Decisions — ZyLabs AI Research Copilot
+# Engineering Decisions — Insight AI
 
 ## Decision 1: LangGraph Graph Structure — Retry Loop vs. Simple Pipeline
 

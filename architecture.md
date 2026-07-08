@@ -1,4 +1,4 @@
-# Architecture: ZyLabs AI Research Copilot
+# Architecture: Insight AI
 
 ## System Diagram
 

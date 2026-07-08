@@ -1,4 +1,4 @@
-# ZyLabs AI Research Copilot
+# Insight AI
 
 > AI-powered sales research assistant that prepares you for any business meeting with deep company intelligence and structured briefings.
 
@@ -92,7 +92,7 @@ Open: http://localhost:5173
 ## Project Structure
 
 ```
-ZyLabs/
+Insight AI/
 ├── backend/
 │   ├── main.py                 # FastAPI application
 │   ├── config.py               # Settings (pydantic-settings)

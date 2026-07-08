@@ -1,5 +1,5 @@
 """
-ZyLabs AI Research Copilot — FastAPI Application Entry Point
+Insight AI — FastAPI Application Entry Point
 """
 import os
 
