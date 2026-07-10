@@ -2,6 +2,10 @@
 
 ![Insight AI](https://img.shields.io/badge/Status-Production-success) ![Python](https://img.shields.io/badge/Python-3.12-blue) ![React](https://img.shields.io/badge/React-18.0-61dafb) ![FastAPI](https://img.shields.io/badge/FastAPI-0.109-00a393) ![LangGraph](https://img.shields.io/badge/LangGraph-AI-orange)
 
+<div align="center">
+  <img src="image/image.png" alt="Insight AI Dashboard" width="100%" />
+</div>
+
 ## 📌 Executive Summary
 
 ### 🔍 What is it?
