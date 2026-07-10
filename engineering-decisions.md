@@ -1,93 +1,64 @@
-# Engineering Decisions — Insight AI
+# Engineering Decisions: A First-Principles Approach
 
-## Decision 1: LangGraph Graph Structure — Retry Loop vs. Simple Pipeline
-
-### The Decision
-Instead of building a simple linear pipeline (`planner → researcher → analyzer → report_gen`), I implemented a **quality gate with a conditional retry loop** at the `quality_check_node`.
-
-### Alternatives Considered
-
-**A) Simple linear pipeline (no retry):** The simplest possible LangGraph implementation — 4 nodes in sequence, always producing output regardless of quality. Fast, predictable, easy to debug.
-
-**B) Parallel research branches:** Run multiple specialized research sub-graphs in parallel (one for product info, one for news, one for financials) and merge results. Maximum coverage, but complex state management and hard to implement with LangGraph's current graph API.
-
-**C) Human-in-the-loop confirmation:** Add a checkpoint after `quality_check` where execution pauses and waits for user confirmation before proceeding. Technically possible with LangGraph's `interrupt_before` feature, but introduces latency and UX complexity.
-
-### What I Chose and Why
-Option A was rejected because quality variance in web search results is high — a well-planned search sometimes returns mostly irrelevant content, and blindly generating a report from poor research would produce unreliable output that damages user trust.
-
-I implemented the retry loop (between A and B) because it provides meaningful quality improvement in cases where the first research pass underperforms, while keeping the graph complexity manageable. The hybrid quality scoring (heuristic + LLM) ensures the retry triggers only when truly needed, not on minor imperfections.
-
-### Tradeoffs Made
-- **Latency:** A retry adds 30–60 seconds to the workflow. Mitigated by capping retries at `MAX_RETRIES=2`.
-- **Token cost:** Each retry re-runs the analyzer LLM call. Could be optimized by only re-running search for *specific missing sections* rather than the full analysis.
-- **Complexity:** The conditional routing logic needed to correctly handle the `increment_retry` node between `quality_check` and `researcher` took careful graph edge definition.
+This document outlines the core architectural and engineering decisions made during the development of Insight AI. Rather than relying on industry trends or analogies, each decision was evaluated from first principles—breaking down the physical constraints of the system (latency, memory, determinism) and building solutions upward.
 
 ---
 
-## Decision 2: SSE vs. WebSockets for Real-Time Streaming
+## 1. Vector Search Architecture: Decoupling Compute from Rate Limits
+**The Fundamental Problem:** 
+Retrieval-Augmented Generation (RAG) effectiveness is fundamentally constrained by two variables: the semantic density of the chunked data and the embedding latency. Web scraping yields massive amounts of unstructured text. Processing this text quickly requires massive parallelization. 
 
-### The Decision
-I used **Server-Sent Events (SSE)** via FastAPI's `StreamingResponse` to stream workflow progress from backend to frontend.
+**Alternatives Considered:**
+1. **Google Gemini / OpenAI Embeddings:** High-quality vectors, but artificially bound by strict external clock limits (Requests Per Minute). 
+2. **Local Open-Source Models (e.g., `all-MiniLM-L6-v2`):** Zero network latency, but fundamentally bound by the hardware memory limits (RAM) of the host container.
 
-### Alternatives Considered
+**The First-Principles Reasoning & Tradeoffs:** 
+If we use a standard API like Gemini, we allow arbitrary rate limits to destroy the real-time User Experience (UX) of our copilot. If we host a local model inside FastAPI, we tightly couple our web server's memory to our embedding workload, creating severe Out-Of-Memory (OOM) risks when scaling concurrent users on cheap infrastructure (Render/HF Spaces). 
 
-**A) Polling:** Frontend polls `/api/sessions/{id}` every 2–3 seconds. Simple to implement, works everywhere, no connection management. But introduces up to 3-second latency on node completion and hammers the server with requests.
-
-**B) WebSockets:** Full-duplex real-time connection. Supports bidirectional communication, better suited if we needed to send control signals during workflow execution (e.g., "pause" or "cancel").
-
-**C) SSE (chosen):** Unidirectional server-push over a standard HTTP connection. Automatically reconnects on disconnection, works through HTTP/2, supported natively in all modern browsers with the `EventSource` API.
-
-### What I Chose and Why
-SSE is the right fit here because:
-1. The workflow communication is strictly server → client (we never need to send data mid-stream from client to server)
-2. No WebSocket library overhead
-3. Works through standard HTTP proxies and load balancers without configuration
-4. The `EventSource` API is natively available in React without dependencies
-
-### Tradeoffs Made
-- **No cancellation:** Because SSE is unidirectional, there is no built-in mechanism to cancel a running workflow. The user must wait for completion or close the page. In a production version, I would add a cancel endpoint (`DELETE /api/sessions/{id}/stream`) that signals a stop via an asyncio `Event`.
-- **Connection limits:** Browsers limit SSE connections to ~6 per origin. For a multi-tab user this could be an issue, though uncommon in practice.
-- **Backpressure:** If the LangGraph graph emits state faster than the SSE generator can flush it, events could queue up. The `await asyncio.sleep(0.05)` between events mitigates this.
+**The Decision:** We migrated to **Jina Embeddings v3**. Jina acts as a highly specialized, stateless conversion function specifically optimized for high-throughput batching. This completely decoupled our embedding bottleneck. It satisfied the latency requirement (allowing hundreds of chunks per second) and the memory requirement (consuming zero local container RAM), trading slight architectural complexity for immense scalability.
 
 ---
 
-## Decision 3: Hybrid Quality Scoring — Heuristic + LLM Judge
+## 2. Stateful Orchestration: The Necessity of Closed-Loop Control
+**The Fundamental Problem:** 
+The internet is inherently non-deterministic. Scrapers will fail, websites will block crawlers, and the quality of extracted HTML will drastically fluctuate. 
 
-### The Decision
-The `quality_check_node` uses a **two-stage scoring approach**: a fast heuristic first, and an LLM judge only if the heuristic score is insufficient (< 0.85).
+**Alternatives Considered:**
+1. **Linear LangChain Pipelines:** Mapping Input A directly to Output B sequentially.
+2. **LangGraph State Machines:** A cyclical graph architecture capable of loops and state-tracking.
 
-### Alternatives Considered
+**The First-Principles Reasoning & Tradeoffs:** 
+A rigid, linear data pipeline fundamentally assumes a deterministic world. If a target website blocks the scraper, a linear chain fails and returns an empty report. However, from first principles of control theory, a resilient autonomous agent must operate as a **closed-loop control system**. It must observe its output, compute an "error" (e.g., our `quality_score`), and adjust its actions (re-scrape different URLs) until the error is minimized. 
 
-**A) LLM-only scoring:** Use the LLM to score every time. Most accurate but adds a full LLM call to every workflow run even when the analysis is already excellent. 5–10 extra seconds and additional token cost per run.
-
-**B) Heuristic-only scoring:** Just count words and list lengths. Very fast and free, but crude — a verbose but low-quality analysis might score high, while a concise but accurate one might score low.
-
-**C) Hybrid (chosen):** Heuristic first. If score ≥ 0.85, trust it and skip the LLM call. If score < 0.85, call the LLM for a more nuanced evaluation and blend the two scores (70% LLM, 30% heuristic).
-
-**D) Embedding similarity:** Compare the analysis against a "gold standard" template using cosine similarity of embeddings. More principled, but adds the embedding model dependency and complexity.
-
-### What I Chose and Why
-The hybrid approach gives the best balance:
-- Most runs have good-quality analysis (the LLM analyzer is well-prompted) → heuristic alone suffices for ~70% of runs, saving latency and cost
-- When research is genuinely poor (few results, vague content), the heuristic catches it (very low word counts / list lengths)
-- The LLM judge is reserved for borderline cases (score 0.5–0.85) where human-like judgment is most valuable
-
-### Tradeoffs Made
-- **Score calibration:** The 0.85 threshold for skipping LLM scoring was chosen empirically. A more rigorous approach would run both on a test set and tune the threshold to minimize LLM calls while maintaining accuracy.
-- **Blending weights:** The 70/30 LLM/heuristic blend was chosen to trust LLM judgment more, but this means an LLM hallucinating a high score could override a low heuristic score. In practice, the LLM prompt is directive enough to prevent this.
-- **Latency inconsistency:** Workflow runtime varies depending on whether the LLM quality check is triggered, making it hard to give users an ETA.
+**The Decision:** We implemented **LangGraph**. This transformed our backend from a fragile pipeline into a self-healing finite state machine. By introducing an LLM "Quality Check" node that scores the scraped data, the system can autonomously route backward to the search node if the data is insufficient. We traded execution predictability (we don't know exactly how many loops it will take) for absolute reliability.
 
 ---
 
-## What I Would Improve With 2 Additional Weeks
+## 3. Real-Time UX: SSE vs. WebSockets
+**The Fundamental Problem:** 
+Researching a company takes 30 to 90 seconds. To prevent user abandonment, the UI must provide real-time, granular state updates. This requires an open connection between the client and server.
 
-### Week 1
-1. **Authentication** — Add JWT-based auth with `python-jose` + `passlib`. Create `users` table, add login/register pages. Gate all session endpoints with `current_user` dependency.
-2. **PostgreSQL migration** — Replace SQLite with PostgreSQL via `asyncpg` + Alembic migrations. This unblocks horizontal scaling.
-3. **Background task queue** — Move LangGraph workflow execution to Celery workers (with Redis broker) so web processes only handle HTTP, not long-running AI tasks. This also enables proper workflow cancellation.
+**Alternatives Considered:**
+1. **WebSockets:** Full-duplex, persistent connection.
+2. **HTTP Short-Polling:** The client repeatedly asks the server for status updates every 2 seconds.
+3. **Server-Sent Events (SSE):** A unidirectional, persistent HTTP stream.
 
-### Week 2
-4. **PDF export** — Add `weasyprint` or `playwright` PDF generation endpoint. This is the #1 requested feature from any sales team.
-5. **Streaming token output** — Use LangChain's streaming callbacks to stream LLM tokens back through SSE as they're generated, rather than waiting for full node completion. This dramatically improves perceived performance.
-6. **Comprehensive test suite** — Unit tests for each LangGraph node with mocked LLM/search responses. Integration tests for the SSE endpoint. This is the biggest missing engineering quality gap in the current submission.
+**The First-Principles Reasoning & Tradeoffs:** 
+Polling fundamentally wastes network bandwidth and database I/O by asking questions that haven't changed. WebSockets solve the polling issue, but they provide full-duplex communication (two-way). The physical reality of our data flow is strictly unidirectional: the backend is doing the heavy lifting, and the frontend merely needs to listen. WebSockets require complex load balancing, sticky sessions, and heavy memory allocation per connection. 
+
+**The Decision:** We implemented **Server-Sent Events (SSE)** via FastAPI's `StreamingResponse`. SSE perfectly maps to the fundamental truth of the system: data flows one way. It operates over standard HTTP, traversing strict enterprise firewalls seamlessly, and consumes a fraction of the memory overhead of a WebSocket. We sacrificed bi-directional real-time capabilities (which we didn't need) for maximum stability and simplicity.
+
+---
+
+## BONUS: What I would improve with 2 additional weeks
+
+With two additional weeks of engineering time, I would focus entirely on **Asynchronous Event-Driven Architecture**.
+
+**The Current Constraint:**
+Currently, LangGraph is executed in a background thread within the FastAPI process (`asyncio.to_thread()`). While non-blocking, synchronous LLM network I/O still consumes process resources. If 100 users hit the endpoint simultaneously, the API container will buckle under the thread-pool weight.
+
+**The 2-Week Engineering Plan:**
+1. **Decouple the Execution Cycle:** The HTTP Request cycle must be fundamentally separated from the execution cycle. 
+2. **Implement Celery & Redis:** I would extract the LangGraph orchestrator into isolated Celery worker containers. FastAPI would simply write a "Research Event" to a Redis queue and return `202 Accepted` in milliseconds.
+3. **Horizontal Scaling:** This enables absolute horizontal scaling. We could spin up 50 cheap, stateless Celery worker nodes to process LLM graphs independently. If a bad scraping job crashes a worker, it has zero impact on the core API gateway serving user traffic.
+4. **Redis Pub/Sub:** The SSE streams would be refactored to listen to a Redis Pub/Sub channel. This means the user maintains their lightweight SSE connection to any API node, while the updates flow seamlessly from whichever isolated Celery worker is currently processing their graph.

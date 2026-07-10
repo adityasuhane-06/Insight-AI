@@ -71,15 +71,16 @@ class ChatZAI(BaseChatModel):
         run_manager: Optional[Any] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        from zhipuai import ZhipuAI
-        client = ZhipuAI(api_key=self.zai_api_key)
+        from zai import ZaiClient
+        client = ZaiClient(api_key=self.zai_api_key)
         zai_messages = self._convert_messages(messages)
         
         response = client.chat.completions.create(
             model=self.model_name,
             messages=zai_messages,
             max_tokens=self.max_tokens,
-            temperature=self.temperature
+            temperature=self.temperature,
+            thinking={"type": "enabled"}
         )
         content = response.choices[0].message.content
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])

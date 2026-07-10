@@ -1,119 +1,55 @@
-# Architecture: Insight AI
+# Architecture Documentation
 
-## System Diagram
+## 1. System Architecture Sketch
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       User Browser                               │
-│              React 18 + Vite + TypeScript                        │
-│                                                                  │
-│  ┌──────────┐  ┌──────────────────┐  ┌───────────────────────┐  │
-│  │  Session │  │  Session Detail  │  │      New Session      │  │
-│  │   List   │  │  (SSE Streaming) │  │        Form           │  │
-│  └──────────┘  └──────────────────┘  └───────────────────────┘  │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTP + SSE
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    FastAPI Backend                               │
-│                   (Python 3.11)                                 │
-│                                                                  │
-│  ┌────────────────┐  ┌────────────────┐  ┌───────────────────┐  │
-│  │  /api/sessions │  │ /api/sessions/ │  │  /api/sessions/   │  │
-│  │  (CRUD)        │  │  {id}/stream   │  │  {id}/chat        │  │
-│  │                │  │  (SSE + Graph) │  │  (LLM Q&A)        │  │
-│  └────────────────┘  └───────┬────────┘  └───────────────────┘  │
-└──────────────────────────────┼──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   LangGraph Workflow                             │
-│                                                                  │
-│  planner → researcher → analyzer → quality_check                 │
-│                ↑ (retry)               │                         │
-│                └───────────────────────┘                         │
-│                                        ↓                         │
-│                                   report_gen → END               │
-│                                        ↓                         │
-│                                  error_handler → END             │
-└──────────────────────────────────────────────────────────────────┘
-                               │
-          ┌────────────────────┼────────────────────────┐
-          ▼                    ▼                         ▼
-┌─────────────────┐  ┌─────────────────┐   ┌───────────────────┐
-│  Google Gemini  │  │  Tavily Search  │   │  SQLite Database  │
-│  (LLM)          │  │  (Web Search)   │   │  (Persistence)    │
-└─────────────────┘  └─────────────────┘   └───────────────────┘
+```text
+       [ Web Browser (React / Vite) ]
+                    |
+              (REST / SSE)
+                    |
+                    v
+       [ FastAPI Backend Server ] <============> [ Aiven MySQL Database ]
+                    |
+            (Background Task)
+                    |
+                    v
+       [ LangGraph Orchestrator ]
+                    |
+    +---------------+---------------+
+    |               |               |
+[ Tavily API ]  [ ZAI LLM ]    [ ChromaDB ]
 ```
 
----
+## 2. Layer Descriptions & Technology Choices
 
-## Layer Descriptions
+### Frontend Layer: React + Vite + Vanilla CSS
+**What it does:** Provides a responsive, dynamic user interface where users can submit research targets, watch real-time progress updates via Server-Sent Events (SSE), and seamlessly chat with the finalized intelligence report.
+**Why we chose it:** React enables highly interactive state-driven components. Vite provides blazing-fast Hot Module Replacement (HMR) during development. We opted for Vanilla CSS to achieve a deeply customized, premium "Copilot" aesthetic without the prescriptive constraints of utility frameworks like Tailwind.
 
-### Frontend — React 18 + Vite + TypeScript
+### Backend API Layer: FastAPI (Python 3.12)
+**What it does:** Acts as the primary API gateway. It receives user requests, writes initial states to the SQL database, kicks off long-running AI tasks in the background, and streams real-time updates back to the client.
+**Why we chose it:** FastAPI is built from the ground up for asynchronous programming (`asyncio`). This is absolutely critical for this application, as it allows the server to maintain open SSE connections with multiple clients and run heavy scraping tasks without blocking the main event loop.
 
-The frontend is a single-page application built with React 18 and Vite. I chose Vite over Create React App for its dramatically faster dev server and HMR. TypeScript provides type safety across API boundaries.
+### AI Orchestration Layer: LangGraph + ZAI SDK (GLM-4.7-Flash)
+**What it does:** Manages the complex, multi-step workflow. It controls a state machine where different "nodes" (Agents) handle web scraping, data chunking, LLM evaluation, and final report generation. 
+**Why we chose it:** Traditional linear AI pipelines break down when web scraping fails or returns poor data. LangGraph provides deterministic state management, allowing our workflow to loop backward and try again if the data quality is too low. The ZAI SDK (GLM-4.7-Flash) was selected for the "brain" because of its extremely fast inference and superior instruction-following, which is crucial for reliably parsing unstructured web data into structured JSON.
 
-Key design choices:
-- **Vanilla CSS with CSS Modules** — No CSS framework overhead. Each component has its own `.module.css` file providing encapsulated styles.
-- **Server-Sent Events (SSE)** — The `useSSE` hook wraps the native `EventSource` API to stream workflow progress in real time. SSE was chosen over WebSockets because the communication is one-directional (server → client only during workflow execution), making SSE a simpler and more appropriate fit.
-- **React Router v6** — Nested routes with a shared `Layout` component.
-- **Optimistic updates** in chat — User messages appear instantly before the API response to reduce perceived latency.
+### Storage Layer: Aiven MySQL + ChromaDB Managed Cloud
+**What it does:** MySQL acts as the persistent system of record, storing session metadata, status flags, and user chat histories. ChromaDB acts as our high-dimensional vector store for semantic search.
+**Why we chose it:** We needed a strict separation of concerns. MySQL provides ACID compliance and robust relational schemas to track application state securely. ChromaDB was chosen for the AI layer because it is purpose-built for storing text embeddings and allows for ultra-fast, nearest-neighbor semantic search during the RAG (Retrieval-Augmented Generation) chat phase.
 
-### Backend — Python + FastAPI
+## 3. Data Flow: From Input to Final Report
 
-FastAPI was chosen for its async-first design (critical for SSE streaming), automatic OpenAPI documentation, and Pydantic validation. The async SQLAlchemy engine with aiosqlite allows non-blocking database operations alongside streaming responses.
+1. **Input:** The user enters a target company and a meeting objective in the React UI.
+2. **Initialization:** The Frontend sends a `POST` request to FastAPI. FastAPI creates a `Session` row in MySQL, triggers the LangGraph workflow in a background thread, and immediately returns the `session_id`.
+3. **Streaming State:** The Frontend opens an SSE connection (`/api/sessions/{id}/stream`), listening for live progress updates.
+4. **Data Gathering:** LangGraph queries the Tavily API to find relevant URLs, scrapes the raw HTML, and uses Jina Embeddings v3 to convert the text into vectors, streaming them into ChromaDB.
+5. **Quality Evaluation:** The Analyzer agent reads the newly embedded vectors and asks the ZAI LLM to evaluate if the data successfully answers the user's objective. If the data is poor, the graph loops back to step 4 to scrape different sources.
+6. **Report Generation:** Once the data passes the quality threshold, the Report Generator agent pulls the aggregated context, synthesizes a final Markdown report, and saves it to MySQL.
+7. **Completion:** LangGraph marks the session as "completed" and closes the SSE stream. The React UI updates instantly, displaying the report and enabling the RAG Chat interface.
 
-The backend is organized into:
-- `routers/` — thin HTTP layer (no business logic)
-- `workflow/` — all LangGraph logic isolated from HTTP concerns
-- `services/` — shared infrastructure (LLM factory)
+## 4. Notable Tradeoffs & Constraints
 
-The LLM service uses `lru_cache` so the model is initialized only once and reused across requests.
-
-### LangGraph Workflow — AI Research Engine
-
-LangGraph was mandatory and is the core of the product. The workflow implements a stateful directed graph with 6 nodes:
-
-1. **planner_node** — Given company + objective, the LLM generates 7 targeted search queries. Has a hardcoded fallback if LLM parsing fails.
-2. **research_node** — Runs all queries concurrently (asyncio) with a semaphore limiting concurrency to 3 to avoid rate limits. Supports Tavily (primary) and DuckDuckGo (fallback).
-3. **analysis_node** — Passes all raw research to the LLM with a strict JSON schema prompt covering all 9 report sections.
-4. **quality_check_node** — Scores the analysis using a hybrid approach: a fast heuristic (word counts, list lengths) and an LLM judge. If the heuristic score is ≥ 0.85, the LLM call is skipped entirely to save tokens.
-5. **report_gen_node** — Formats the analysis into polished Markdown, then uses a second LLM call to polish the language for professional quality.
-6. **error_handler_node** — Captures any unhandled exceptions, preserves partial data, and sets status to `failed`.
-
-**Conditional routing** at `quality_check_node` implements a retry loop:
-- `score ≥ 0.65` OR `retry_count ≥ 2` → `report_gen`
-- `score < 0.65` AND retries remaining → `increment_retry` → `researcher` (re-runs search)
-- Hard error → `error_handler`
-
-### Storage — SQLite + SQLAlchemy Async
-
-SQLite was chosen for zero-infrastructure simplicity appropriate for an intern assignment. The schema has two tables: `research_sessions` (stores full report markdown + JSON) and `chat_messages` (stores conversation history). The async engine allows database operations to run without blocking the event loop during SSE streaming.
-
----
-
-## Data Flow
-
-1. **User submits** company name, website, and objective via the React form
-2. **POST /api/sessions** creates a `ResearchSession` record in SQLite (status: `pending`)
-3. **Frontend navigates** to `/sessions/{id}` and automatically opens an SSE connection to `GET /api/sessions/{id}/stream`
-4. **FastAPI** starts the LangGraph graph via `graph.astream()` inside the SSE generator
-5. **Each node** completes and emits its output; FastAPI serializes a progress event as `data: {...}\n\n`
-6. **React `useSSE` hook** parses each event and updates the `WorkflowProgress` component in real time
-7. **On completion**, FastAPI saves the final report to SQLite; frontend reloads the session and switches to the report tab
-8. **Chat** sends `POST /api/sessions/{id}/chat` with the user's message; FastAPI calls the LLM with the full report as system context
-
----
-
-## Notable Tradeoffs & Constraints
-
-**SQLite vs. PostgreSQL** — SQLite provides zero-infrastructure convenience but would not work in a multi-process production deployment. For production, this should be swapped for PostgreSQL with an async adapter (asyncpg).
-
-**SSE vs. WebSockets** — SSE is simpler for unidirectional streaming but does not support bidirectional communication. If real-time chat streaming (token-by-token) were required, WebSockets would be needed. Chat currently returns full responses.
-
-**LLM quality vs. latency** — Running 3 sequential LLM calls (planner + analyzer + report_gen) plus an optional quality check adds significant latency (30–90 seconds depending on provider). The quality check heuristic optimization (skip LLM if heuristic ≥ 0.85) saves ~2–5 seconds on most runs.
-
-**DuckDuckGo fallback** — The free DuckDuckGo search is less reliable and rate-limited compared to Tavily. It is only used when no Tavily key is configured and is not recommended for production.
-
-**Retry loop** — The quality check retry loop can add significant latency. The default of `MAX_RETRIES=2` with a `QUALITY_THRESHOLD=0.65` was tuned to balance quality vs. speed.
+* **Rate Limits vs. Throughput (Embeddings):** Initially, we attempted to embed hundreds of scraped web chunks using standard provider APIs, which resulted in severe `429 Too Many Requests` bottlenecks. **Tradeoff:** We migrated the entire embedding pipeline to *Jina Embeddings v3*, which allowed for high-throughput batch processing. This solved the crash but introduced an additional third-party API dependency to manage.
+* **Synchronous Bottlenecks in Async Frameworks:** Many Python SDKs (and parts of LangChain/LangGraph) are historically synchronous. **Constraint:** To prevent these blocking calls from freezing FastAPI's asynchronous event loop (which would kill the SSE streams for the user), we had to carefully dispatch the LangGraph execution to isolated threadpools using `asyncio.to_thread`.
+* **Scraper Fragility vs. Breadth:** Web scraping is inherently unpredictable due to CAPTCHAs, paywalls, and JavaScript-heavy DOMs. **Tradeoff:** Instead of building a heavy, slow Puppeteer/Selenium implementation to deeply render a single page, we opted for broad, shallow scraping via Tavily. This guarantees we get *some* relevant context quickly, prioritizing speed and stability over deep extraction.
