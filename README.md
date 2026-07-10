@@ -126,15 +126,22 @@ This illustrates how external actors (Users) interact with the platform to achie
 ```mermaid
 graph LR
     User([Business Professional])
-    User --> (Create New Research Session)
-    User --> (View Executive Report)
-    User --> (Chat with RAG AI)
+    UC1(Create New Research Session)
+    UC2(View Executive Report)
+    UC3(Chat with RAG AI)
+    UC4(Scrape Target Company Data)
+    UC5(Analyze & Score Quality)
+    UC6(Retrieve Semantic Context via Chroma)
+    
+    User --> UC1
+    User --> UC2
+    User --> UC3
     
     subgraph Insight AI Copilot
-        (Create New Research Session) --> (Scrape Target Company Data)
-        (Scrape Target Company Data) --> (Analyze & Score Quality)
-        (View Executive Report) -.-> (Analyze & Score Quality)
-        (Chat with RAG AI) --> (Retrieve Semantic Context via Chroma)
+        UC1 --> UC4
+        UC4 --> UC5
+        UC2 -.-> UC5
+        UC3 --> UC6
     end
 ```
 
